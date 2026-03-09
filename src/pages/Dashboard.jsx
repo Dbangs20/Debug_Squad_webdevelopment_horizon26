@@ -21,6 +21,11 @@ import RoleToggle from '../components/RoleToggle'
 import LiveIndicator from '../components/LiveIndicator'
 import WarRoomMode from '../components/WarRoomMode'
 import StatCard from '../components/StatCard'
+import ScenarioPresets from '../components/ScenarioPresets'
+import TimelinePanel from '../components/TimelinePanel'
+import StressExplainabilityPanel from '../components/StressExplainabilityPanel'
+import SLARiskPanel from '../components/SLARiskPanel'
+import DecisionLogPanel from '../components/DecisionLogPanel'
 import { useMetricsStore } from '../store/metricsStore'
 
 const navItems = [
@@ -45,16 +50,21 @@ export default function Dashboard() {
     actions,
     role,
     page,
+    scenario,
     tick,
     isReplaying,
     warRoomManual,
     stressNudge,
+    events,
+    decisionLog,
     setRole,
     setPage,
+    setScenario,
     setStressNudge,
     startSimulation,
     replayHistory,
     toggleWarRoom,
+    acknowledgeAction,
   } = useMetricsStore()
 
   useEffect(() => {
@@ -134,6 +144,10 @@ export default function Dashboard() {
 
   const overview = (
     <>
+      <div className="mb-4">
+        <ScenarioPresets scenario={scenario} onSelect={setScenario} />
+      </div>
+
       <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Revenue Today" value={currency(metrics.sales.revenueToday)} tone="cyan" stressPulse={stressPulse} />
         <StatCard label="Orders / Min" value={metrics.sales.ordersPerMinute} tone="emerald" stressPulse={stressPulse} />
@@ -160,13 +174,24 @@ export default function Dashboard() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-12">
         <div className="xl:col-span-5"><AlertsPanel alerts={alerts} /></div>
-        <div className="xl:col-span-7"><AIInsightsPanel insights={insights} actions={actions} /></div>
+        <div className="xl:col-span-7"><AIInsightsPanel insights={insights} actions={actions} onActionClick={acknowledgeAction} isReplaying={isReplaying} /></div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-5"><TimelinePanel events={events} /></div>
+        <div className="xl:col-span-3"><StressExplainabilityPanel factors={stressFactors} score={stressScore} /></div>
+        <div className="xl:col-span-4"><SLARiskPanel support={metrics.support} /></div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-12"><DecisionLogPanel logs={decisionLog} /></div>
       </div>
     </>
   )
 
   const ownerView = (
     <div className="space-y-4">
+      <ScenarioPresets scenario={scenario} onSelect={setScenario} />
       <div className="grid gap-3 md:grid-cols-3">
         <StatCard label="Revenue Today" value={currency(metrics.sales.revenueToday)} tone="cyan" stressPulse={stressPulse} />
         <StatCard label="Stress Score" value={stressScore.toFixed(1)} tone="rose" stressPulse={stressPulse} />
@@ -181,11 +206,17 @@ export default function Dashboard() {
         <CashFlowChart data={metrics.cashFlow.series} />
         <AlertsPanel alerts={alerts} />
       </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <TimelinePanel events={events} />
+        <StressExplainabilityPanel factors={stressFactors} score={stressScore} />
+        <DecisionLogPanel logs={decisionLog} />
+      </div>
     </div>
   )
 
   const operationsView = (
     <div className="space-y-4">
+      <ScenarioPresets scenario={scenario} onSelect={setScenario} />
       {warRoomActive && <WarRoomMode alerts={alerts} actions={actions} metrics={metrics} onExit={toggleWarRoom} />}
       <div className="grid gap-4 lg:grid-cols-2">
         <InventoryCard inventory={metrics.inventory} />
@@ -193,17 +224,22 @@ export default function Dashboard() {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <AlertsPanel alerts={alerts} />
-        <AIInsightsPanel insights={insights} actions={actions} />
+        <AIInsightsPanel insights={insights} actions={actions} onActionClick={acknowledgeAction} isReplaying={isReplaying} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SLARiskPanel support={metrics.support} />
+        <TimelinePanel events={events} />
+        <DecisionLogPanel logs={decisionLog} />
       </div>
     </div>
   )
 
   const sectionMap = {
     dashboard: overview,
-    sales: <SalesChart data={metrics.sales.series} />,
-    inventory: <InventoryCard inventory={metrics.inventory} />,
-    support: <SupportCard support={metrics.support} />,
-    cashflow: <CashFlowChart data={metrics.cashFlow.series} />,
+    sales: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><SalesChart data={metrics.sales.series} /></div>,
+    inventory: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><InventoryCard inventory={metrics.inventory} /></div>,
+    support: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><SupportCard support={metrics.support} /><SLARiskPanel support={metrics.support} /></div>,
+    cashflow: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><CashFlowChart data={metrics.cashFlow.series} /><StressExplainabilityPanel factors={stressFactors} score={stressScore} /></div>,
     alerts: <AlertsPanel alerts={alerts} />,
   }
 

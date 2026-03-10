@@ -21,11 +21,12 @@ import RoleToggle from '../components/RoleToggle'
 import LiveIndicator from '../components/LiveIndicator'
 import WarRoomMode from '../components/WarRoomMode'
 import StatCard from '../components/StatCard'
-import ScenarioPresets from '../components/ScenarioPresets'
 import TimelinePanel from '../components/TimelinePanel'
 import StressExplainabilityPanel from '../components/StressExplainabilityPanel'
 import SLARiskPanel from '../components/SLARiskPanel'
 import DecisionLogPanel from '../components/DecisionLogPanel'
+import LiveEventStream from '../components/LiveEventStream'
+import PredictiveRiskPanel from '../components/PredictiveRiskPanel'
 import { useMetricsStore } from '../store/metricsStore'
 
 const navItems = [
@@ -50,16 +51,17 @@ export default function Dashboard() {
     actions,
     role,
     page,
-    scenario,
     tick,
     isReplaying,
     warRoomManual,
     stressNudge,
     events,
+    liveEvents,
+    prediction,
+    connected,
     decisionLog,
     setRole,
     setPage,
-    setScenario,
     setStressNudge,
     startSimulation,
     replayHistory,
@@ -111,7 +113,7 @@ export default function Dashboard() {
     <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h2 className="font-display text-2xl font-semibold text-white">Real-Time Operations Command Center</h2>
-        <p className="text-sm text-slate-400">Small e-commerce simulation • updates every 2s</p>
+        <p className="text-sm text-slate-400">Live backend event stream • updates every 1-3s</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -144,10 +146,6 @@ export default function Dashboard() {
 
   const overview = (
     <>
-      <div className="mb-4">
-        <ScenarioPresets scenario={scenario} onSelect={setScenario} />
-      </div>
-
       <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Revenue Today" value={currency(metrics.sales.revenueToday)} tone="cyan" stressPulse={stressPulse} />
         <StatCard label="Orders / Min" value={metrics.sales.ordersPerMinute} tone="emerald" stressPulse={stressPulse} />
@@ -184,6 +182,11 @@ export default function Dashboard() {
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-12">
+        <div className="xl:col-span-7"><LiveEventStream events={liveEvents} connected={connected} /></div>
+        <div className="xl:col-span-5"><PredictiveRiskPanel prediction={prediction} /></div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-12">
         <div className="xl:col-span-12"><DecisionLogPanel logs={decisionLog} /></div>
       </div>
     </>
@@ -191,7 +194,6 @@ export default function Dashboard() {
 
   const ownerView = (
     <div className="space-y-4">
-      <ScenarioPresets scenario={scenario} onSelect={setScenario} />
       <div className="grid gap-3 md:grid-cols-3">
         <StatCard label="Revenue Today" value={currency(metrics.sales.revenueToday)} tone="cyan" stressPulse={stressPulse} />
         <StatCard label="Stress Score" value={stressScore.toFixed(1)} tone="rose" stressPulse={stressPulse} />
@@ -211,12 +213,15 @@ export default function Dashboard() {
         <StressExplainabilityPanel factors={stressFactors} score={stressScore} />
         <DecisionLogPanel logs={decisionLog} />
       </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <LiveEventStream events={liveEvents} connected={connected} />
+        <PredictiveRiskPanel prediction={prediction} />
+      </div>
     </div>
   )
 
   const operationsView = (
     <div className="space-y-4">
-      <ScenarioPresets scenario={scenario} onSelect={setScenario} />
       {warRoomActive && <WarRoomMode alerts={alerts} actions={actions} metrics={metrics} onExit={toggleWarRoom} />}
       <div className="grid gap-4 lg:grid-cols-2">
         <InventoryCard inventory={metrics.inventory} />
@@ -231,15 +236,19 @@ export default function Dashboard() {
         <TimelinePanel events={events} />
         <DecisionLogPanel logs={decisionLog} />
       </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <LiveEventStream events={liveEvents} connected={connected} />
+        <PredictiveRiskPanel prediction={prediction} />
+      </div>
     </div>
   )
 
   const sectionMap = {
     dashboard: overview,
-    sales: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><SalesChart data={metrics.sales.series} /></div>,
-    inventory: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><InventoryCard inventory={metrics.inventory} /></div>,
-    support: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><SupportCard support={metrics.support} /><SLARiskPanel support={metrics.support} /></div>,
-    cashflow: <div className="space-y-4"><ScenarioPresets scenario={scenario} onSelect={setScenario} /><CashFlowChart data={metrics.cashFlow.series} /><StressExplainabilityPanel factors={stressFactors} score={stressScore} /></div>,
+    sales: <div className="space-y-4"><SalesChart data={metrics.sales.series} /><LiveEventStream events={liveEvents} connected={connected} /></div>,
+    inventory: <div className="space-y-4"><InventoryCard inventory={metrics.inventory} /><PredictiveRiskPanel prediction={prediction} /></div>,
+    support: <div className="space-y-4"><SupportCard support={metrics.support} /><SLARiskPanel support={metrics.support} /><TimelinePanel events={events} /></div>,
+    cashflow: <div className="space-y-4"><CashFlowChart data={metrics.cashFlow.series} /><StressExplainabilityPanel factors={stressFactors} score={stressScore} /></div>,
     alerts: <AlertsPanel alerts={alerts} />,
   }
 

@@ -1,96 +1,74 @@
 # OpsPulse — Unified Business Health Dashboard for SMBs
 
-OpsPulse is a real-time SaaS-style operations dashboard built for hackathon evaluation. It unifies simulated data across Sales, Inventory, Support, and Cash Flow into a single decision layer with intelligent alerts, role-based views, and crisis-focused War Room mode.
+OpsPulse is now a full-stack real-time operational intelligence platform. It streams business events, computes stress on the backend, stores events in MongoDB, and powers a live dashboard for SMB operators.
 
 ## Stack
 
-- React + Vite
-- TailwindCSS
-- Recharts
-- Framer Motion
-- Zustand
-- Lucide React
+- Frontend: React + Vite, TailwindCSS, Recharts, Framer Motion, Zustand
+- Backend: Node.js, Express, Socket.io, MongoDB (Mongoose)
 
-## Key Features Implemented
+## Core Full-Stack Features
 
-- Live data simulation every 2 seconds via `setInterval`
-- Weighted **Business Stress Score** (`0-100`) with animated gauge
-- Real-time live indicator pulse and update cycle
-- Intelligent alert feed with 3 classes:
-  - Crisis Alerts
-  - Opportunity Alerts
-  - Anomaly Alerts
-- Dual-role dashboard modes:
-  - Business Owner
-  - Operations Manager
-- War Room Mode for high stress (`score > 75`) + manual toggle
-- Rule-based AI insights and recommended actions
-- Replay engine for last 5 minutes from stored snapshots
-- Functional sidebar + mobile navigation buttons
-- Simulate Stress slider for demo control
-- Neon dark glassmorphism UI with hover transitions
+- Business Event Engine emits events every `1-3` seconds
+- MongoDB `BusinessEvent` schema stores all generated events
+- Socket.io stream broadcasts:
+  - `newEvent`
+  - `updatedMetrics`
+  - `updatedStressScore`
+  - `alerts`
+- Stress engine moved to backend
+- Event-driven alert generation (crisis/opportunity/anomaly)
+- Predictive risk engine for stockout/SLA risk windows
+- Live Event Stream panel (last 20 events)
 
-## Unique Features
+## API Endpoints
 
-- Scenario Presets: `Normal`, `Flash Sale`, `Supplier Delay`, `Payment Failure` to shift real-time simulator behavior.
-- Last-60s Change Timeline: auto-generated positive/negative operational events and alert-derived updates.
-- Stress Explainability: weighted factor contribution bars for transparent score interpretation.
-- Support SLA Risk: estimated breach timer from queue size, growth, and response latency.
-- Decision Log: clicking a recommended action records it with timestamp and applies temporary mitigation to stress factors.
+- `GET /api/metrics`
+- `GET /api/events?limit=20`
+- `GET /api/alerts`
+- `GET /api/stress-score`
+- `GET /health`
 
-## Project Structure
+## Environment
 
-```
-src/
-  components/
-    AIInsightsPanel.jsx
-    AlertsPanel.jsx
-    CashFlowChart.jsx
-    InventoryCard.jsx
-    InventoryHealthCard.jsx
-    LiveIndicator.jsx
-    RoleToggle.jsx
-    SalesChart.jsx
-    StatCard.jsx
-    StressScoreGauge.jsx
-    SupportCard.jsx
-    SupportLoadCard.jsx
-    WarRoomMode.jsx
-  pages/
-    Dashboard.jsx
-  store/
-    metricsStore.js
-  utils/
-    alertEngine.js
-    dataSimulator.js
-    stressCalculator.js
-  App.jsx
-  index.css
-  main.jsx
+Create `.env` from `.env.example`.
+
+```env
+PORT=4000
+MONGO_URI=mongodb://127.0.0.1:27017/opspulse
+CLIENT_ORIGIN=http://localhost:5173
+VITE_API_URL=http://localhost:4000/api
+VITE_SOCKET_URL=http://localhost:4000
 ```
 
 ## Run
 
 ```bash
 npm install
+npm run dev:full
+```
+
+Alternative (separate terminals):
+
+```bash
+npm run server:dev
 npm run dev
 ```
 
-## Build
+## Build Frontend
 
 ```bash
 npm run build
 npm run preview
 ```
 
-## Stress Score Formula
+## Notes
 
-```
-Stress Score =
-0.35 × Inventory Risk +
-0.30 × Sales Drop +
-0.20 × Support Load +
-0.15 × Cash Flow Pressure
-```
+- If MongoDB is unavailable, backend continues streaming in memory and serves fallbacks.
+- Stress formula remains:
+  - `0.35 × Inventory Risk`
+  - `0.30 × Sales Drop`
+  - `0.20 × Support Load`
+  - `0.15 × Cash Flow Pressure`
 
-See `STRESS_FORMULA_JUSTIFICATION.md` for business logic and rationale.
+See `STRESS_FORMULA_JUSTIFICATION.md` for judge-facing formula rationale.

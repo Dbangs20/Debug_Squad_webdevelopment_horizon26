@@ -1,123 +1,86 @@
 import { create } from 'zustand'
-import { createInitialMetrics, simulateNextMetrics } from '../utils/dataSimulator'
-import { calculateStressScore } from '../utils/stressCalculator'
-import { generateActions, generateAlerts, generateInsights } from '../utils/alertEngine'
-import { applyScenarioPreset } from '../utils/scenarioEngine'
+import { createInitialMetrics } from '../utils/dataSimulator'
+import { generateActions, generateInsights } from '../utils/alertEngine'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4000'
 
 const REPLAY_POINTS = 150
-const EVENT_POINTS = 180
 const DECISION_POINTS = 40
 
-const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, value))
-
-const weightedScore = (factors) =>
-  0.35 * factors.inventoryRisk +
-  0.3 * factors.salesDrop +
-  0.2 * factors.supportLoad +
-  0.15 * factors.cashFlowPressure
-
-const applyMitigation = (factors, mitigation) => ({
-  inventoryRisk: clamp(factors.inventoryRisk - mitigation.inventoryRisk),
-  salesDrop: clamp(factors.salesDrop - mitigation.salesDrop),
-  supportLoad: clamp(factors.supportLoad - mitigation.supportLoad),
-  cashFlowPressure: clamp(factors.cashFlowPressure - mitigation.cashFlowPressure),
-})
-
-const decayMitigation = (mitigation) => ({
-  inventoryRisk: Number((mitigation.inventoryRisk * 0.82).toFixed(2)),
-  salesDrop: Number((mitigation.salesDrop * 0.82).toFixed(2)),
-  supportLoad: Number((mitigation.supportLoad * 0.82).toFixed(2)),
-  cashFlowPressure: Number((mitigation.cashFlowPressure * 0.82).toFixed(2)),
-})
-
-const buildChangeEvents = (previous, nextMetrics, alerts) => {
-  if (!previous) return []
-
-  const events = []
-  const now = Date.now()
-
-  const revenueDelta = nextMetrics.sales.revenueToday - previous.sales.revenueToday
-  if (Math.abs(revenueDelta) > 450) {
-    events.push({
-      id: `${now}-rev-${Math.random().toString(36).slice(2, 5)}`,
-      timestamp: now,
-      tone: revenueDelta > 0 ? 'positive' : 'negative',
-      message: `Revenue ${revenueDelta > 0 ? 'up' : 'down'} ${Math.abs(revenueDelta).toLocaleString()} vs previous cycle`,
-    })
-  }
-
-  const inventoryDelta = nextMetrics.inventory.lowStockItems - previous.inventory.lowStockItems
-  if (Math.abs(inventoryDelta) > 5) {
-    events.push({
-      id: `${now}-inv-${Math.random().toString(36).slice(2, 5)}`,
-      timestamp: now,
-      tone: inventoryDelta > 0 ? 'negative' : 'positive',
-      message: `Low-stock SKUs ${inventoryDelta > 0 ? 'increased' : 'decreased'} by ${Math.abs(inventoryDelta)}`,
-    })
-  }
-
-  const supportDelta = nextMetrics.support.openTickets - previous.support.openTickets
-  if (Math.abs(supportDelta) > 8) {
-    events.push({
-      id: `${now}-sup-${Math.random().toString(36).slice(2, 5)}`,
-      timestamp: now,
-      tone: supportDelta > 0 ? 'negative' : 'positive',
-      message: `Support queue ${supportDelta > 0 ? 'expanded' : 'shrunk'} by ${Math.abs(supportDelta)} tickets`,
-    })
-  }
-
-  const previousNet = previous.cashFlow.revenue - previous.cashFlow.expenses
-  const nextNet = nextMetrics.cashFlow.revenue - nextMetrics.cashFlow.expenses
-  if ((previousNet >= 0 && nextNet < 0) || (previousNet < 0 && nextNet >= 0)) {
-    events.push({
-      id: `${now}-net-${Math.random().toString(36).slice(2, 5)}`,
-      timestamp: now,
-      tone: nextNet >= 0 ? 'positive' : 'negative',
-      message: `Net cash flow ${nextNet >= 0 ? 'returned positive' : 'turned negative'}`,
-    })
-  }
-
-  alerts.slice(0, 2).forEach((alert) => {
-    events.push({
-      id: `${now}-alert-${alert.id}`,
-      timestamp: now,
-      tone: alert.type === 'opportunity' ? 'positive' : 'negative',
-      message: `${alert.type.toUpperCase()}: ${alert.title}`,
-    })
-  })
-
-  return events
+const eventTone = (type) => {
+  if (['SalesSpike', 'OrderPlaced'].includes(type)) return 'positive'
+  if (['InventoryLow', 'PaymentFailed', 'TicketSpike', 'ShipmentDelayed'].includes(type)) return 'negative'
+  return 'neutral'
 }
 
-const defaultMitigation = {
+const eventMessage = (event) => {
+  if (event.type === 'OrderPlaced') return `OrderPlaced: ${event.items ?? 1} items, value ${event.value ?? '-'} `
+  if (event.type === 'InventoryLow') return `InventoryLow: ${event.metadata?.sku ?? 'SKU'} at ${event.metadata?.remaining ?? '-'} units`
+  if (event.type === 'TicketCreated') return `TicketCreated: ${event.metadata?.category ?? 'General'} issue logged`
+  if (event.type === 'PaymentFailed') return `PaymentFailed: ${event.metadata?.gateway ?? 'Gateway'} failure rate rising`
+  if (event.type === 'ShipmentDelayed') return `ShipmentDelayed: ${event.metadata?.route ?? 'Route'} delayed`
+  if (event.type === 'SalesSpike') return 'SalesSpike: conversion momentum increased'
+  if (event.type === 'TicketSpike') return 'TicketSpike: support queue accelerated'
+  return `${event.type} event detected`
+}
+
+const toTimelineEntry = (event) => ({
+  id: `${event.timestamp}-${event.type}-${Math.random().toString(36).slice(2, 5)}`,
+  timestamp: event.timestamp,
+  tone: eventTone(event.type),
+  message: eventMessage(event),
+})
+
+const defaultStressFactors = {
   inventoryRisk: 0,
   salesDrop: 0,
   supportLoad: 0,
   cashFlowPressure: 0,
 }
 
+const fetchJson = async (url) => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed request: ${url}`)
+  return res.json()
+}
+
+const loadIoClient = async () => {
+  try {
+    const packageName = 'socket.io-client'
+    const mod = await import(/* @vite-ignore */ packageName)
+    return mod.io
+  } catch {
+    return null
+  }
+}
+
 const bootstrap = () => {
   const metrics = createInitialMetrics()
-  const { score, factors } = calculateStressScore(metrics)
 
   return {
     metrics,
-    stressScore: score,
-    stressFactors: factors,
+    stressScore: 0,
+    stressFactors: defaultStressFactors,
     alerts: [],
-    insights: generateInsights(metrics),
-    actions: generateActions(metrics),
+    insights: ['Waiting for backend stream...'],
+    actions: ['Connect backend to activate recommended actions.'],
+    prediction: {
+      level: 'normal',
+      message: 'Prediction engine data will appear once backend starts.',
+      etaMinutes: null,
+    },
     role: 'owner',
     page: 'dashboard',
-    scenario: 'normal',
-    history: [{ timestamp: Date.now(), metrics, stressScore: score }],
+    history: [],
     events: [],
+    liveEvents: [],
     decisionLog: [],
-    mitigation: defaultMitigation,
     tick: Date.now(),
     isReplaying: false,
     warRoomManual: false,
-    simulationTimer: null,
+    socket: null,
+    connected: false,
     replayTimer: null,
     stressNudge: 0,
   }
@@ -128,115 +91,134 @@ export const useMetricsStore = create((set, get) => ({
 
   setRole: (role) => set({ role }),
   setPage: (page) => set({ page }),
-  setScenario: (scenario) => set({ scenario }),
   toggleWarRoom: () => set((state) => ({ warRoomManual: !state.warRoomManual })),
-
-  setStressNudge: (value) =>
-    set((state) => {
-      const baseScore = weightedScore(state.stressFactors)
-      return {
-        stressNudge: value,
-        stressScore: clamp(baseScore + value),
-        tick: Date.now(),
-      }
-    }),
+  setStressNudge: (value) => set({ stressNudge: value }),
 
   acknowledgeAction: (action) =>
-    set((state) => {
-      const effect = { ...defaultMitigation }
-
-      if (/restock|inventory|stock|supplier/i.test(action)) effect.inventoryRisk += 8
-      if (/support|ticket|complaint|response|sla/i.test(action)) effect.supportLoad += 8
-      if (/sales|funnel|campaign|conversion|demand/i.test(action)) effect.salesDrop += 6
-      if (/cash|flow|expense|burn|margin|revenue/i.test(action)) effect.cashFlowPressure += 7
-
-      if (!Object.values(effect).some((value) => value > 0)) {
-        effect.inventoryRisk = 2
-        effect.salesDrop = 2
-        effect.supportLoad = 2
-        effect.cashFlowPressure = 2
-      }
-
-      const nextMitigation = {
-        inventoryRisk: clamp(state.mitigation.inventoryRisk + effect.inventoryRisk, 0, 30),
-        salesDrop: clamp(state.mitigation.salesDrop + effect.salesDrop, 0, 30),
-        supportLoad: clamp(state.mitigation.supportLoad + effect.supportLoad, 0, 30),
-        cashFlowPressure: clamp(state.mitigation.cashFlowPressure + effect.cashFlowPressure, 0, 30),
-      }
-
-      const adjustedFactors = applyMitigation(state.stressFactors, nextMitigation)
-      const score = clamp(weightedScore(adjustedFactors) + state.stressNudge)
-
-      return {
-        decisionLog: [
-          {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            timestamp: Date.now(),
-            action,
-            effect,
+    set((state) => ({
+      decisionLog: [
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: Date.now(),
+          action,
+          effect: {
+            inventoryRisk: /inventory|stock|supplier|restock/i.test(action) ? 4 : 0,
+            salesDrop: /sales|funnel|campaign|conversion/i.test(action) ? 4 : 0,
+            supportLoad: /support|ticket|sla|complaint|response/i.test(action) ? 4 : 0,
+            cashFlowPressure: /cash|expense|margin|burn|revenue/i.test(action) ? 4 : 0,
           },
-          ...state.decisionLog,
-        ].slice(0, DECISION_POINTS),
-        mitigation: nextMitigation,
-        stressFactors: adjustedFactors,
-        stressScore: score,
+        },
+        ...state.decisionLog,
+      ].slice(0, DECISION_POINTS),
+    })),
+
+  initializeFromApi: async () => {
+    try {
+      const [metricsRes, alertsRes, stressRes, eventsRes] = await Promise.all([
+        fetchJson(`${API_URL}/metrics`),
+        fetchJson(`${API_URL}/alerts`),
+        fetchJson(`${API_URL}/stress-score`),
+        fetchJson(`${API_URL}/events?limit=20`),
+      ])
+
+      const metrics = metricsRes.metrics
+      const stressScore = Math.max(0, Math.min(100, (stressRes.stressScore ?? 0) + get().stressNudge))
+      const liveEvents = eventsRes.events ?? []
+      const timeline = liveEvents.map(toTimelineEntry)
+
+      set((state) => ({
+        metrics,
+        insights: generateInsights(metrics),
+        actions: generateActions(metrics),
+        prediction: metricsRes.prediction ?? state.prediction,
+        alerts: alertsRes.alerts ?? [],
+        stressScore,
+        stressFactors: stressRes.stressFactors ?? defaultStressFactors,
+        liveEvents,
+        events: timeline,
+        history: [...state.history, { timestamp: Date.now(), metrics, stressScore }].slice(-REPLAY_POINTS),
         tick: Date.now(),
-      }
-    }),
+      }))
+    } catch {
+      set({ connected: false })
+    }
+  },
 
-  updateMetrics: (nextMetrics) => {
-    const previous = get().metrics
-    const decayedMitigation = decayMitigation(get().mitigation)
-    const { factors } = calculateStressScore(nextMetrics)
-    const adjustedFactors = applyMitigation(factors, decayedMitigation)
-    const score = clamp(weightedScore(adjustedFactors) + get().stressNudge)
-    const newAlerts = generateAlerts(nextMetrics, score)
-    const changeEvents = buildChangeEvents(previous, nextMetrics, newAlerts)
+  connectRealtime: async () => {
+    if (get().socket) return
 
-    set((state) => {
-      const nextHistory = [...state.history, { timestamp: Date.now(), metrics: nextMetrics, stressScore: score }]
+    await get().initializeFromApi()
 
-      return {
-        metrics: nextMetrics,
-        stressScore: score,
-        stressFactors: adjustedFactors,
-        mitigation: decayedMitigation,
-        alerts: [...newAlerts, ...state.alerts].slice(0, 18),
-        insights: generateInsights(nextMetrics),
-        actions: generateActions(nextMetrics),
-        events: [...changeEvents, ...state.events].slice(0, EVENT_POINTS),
-        history:
-          nextHistory.length > REPLAY_POINTS ? nextHistory.slice(nextHistory.length - REPLAY_POINTS) : nextHistory,
-        tick: Date.now(),
-      }
+    const ioFactory = await loadIoClient()
+    if (!ioFactory) {
+      set({ connected: false })
+      return
+    }
+
+    const socket = ioFactory(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
     })
+
+    socket.on('connect', () => {
+      set({ connected: true, socket })
+    })
+
+    socket.on('disconnect', () => {
+      set({ connected: false })
+    })
+
+    socket.on('newEvent', (event) => {
+      set((state) => ({
+        liveEvents: [event, ...state.liveEvents].slice(0, 20),
+        events: [toTimelineEntry(event), ...state.events].slice(0, 180),
+        tick: Date.now(),
+      }))
+    })
+
+    socket.on('updatedMetrics', ({ metrics, prediction }) => {
+      set((state) => {
+        const score = state.stressScore
+        return {
+          metrics,
+          insights: generateInsights(metrics),
+          actions: generateActions(metrics),
+          prediction: prediction ?? state.prediction,
+          history: [...state.history, { timestamp: Date.now(), metrics, stressScore: score }].slice(-REPLAY_POINTS),
+          tick: Date.now(),
+        }
+      })
+    })
+
+    socket.on('updatedStressScore', ({ stressScore, stressFactors }) => {
+      set((state) => ({
+        stressScore: Math.max(0, Math.min(100, stressScore + state.stressNudge)),
+        stressFactors: stressFactors ?? state.stressFactors,
+        tick: Date.now(),
+      }))
+    })
+
+    socket.on('alerts', (alerts) => {
+      set({ alerts: alerts ?? [] })
+    })
+
+    set({ socket })
   },
 
   startSimulation: () => {
-    if (get().simulationTimer) return
-
-    const timer = setInterval(() => {
-      if (get().isReplaying) return
-      const current = get().metrics
-      const withDrift = simulateNextMetrics(current)
-      const withScenario = applyScenarioPreset(withDrift, get().scenario)
-      get().updateMetrics(withScenario)
-    }, 2000)
-
-    set({ simulationTimer: timer })
+    get().connectRealtime()
   },
 
   stopSimulation: () => {
-    const timer = get().simulationTimer
-    if (timer) clearInterval(timer)
-    set({ simulationTimer: null })
+    const socket = get().socket
+    if (socket) socket.close()
+    set({ socket: null, connected: false })
   },
 
   replayHistory: () => {
     const { history, replayTimer } = get()
     if (replayTimer || history.length < 3) return
 
-    let index = Math.max(0, history.length - 150)
+    let index = Math.max(0, history.length - 120)
 
     set({ isReplaying: true })
 
@@ -250,7 +232,7 @@ export const useMetricsStore = create((set, get) => ({
 
       set((state) => ({
         metrics: point.metrics,
-        stressScore: clamp(point.stressScore + state.stressNudge),
+        stressScore: Math.max(0, Math.min(100, point.stressScore + state.stressNudge)),
         tick: Date.now(),
       }))
 
@@ -258,24 +240,18 @@ export const useMetricsStore = create((set, get) => ({
 
       if (index >= history.length) {
         clearInterval(timer)
-        const latest = history[history.length - 1]
-        set((state) => ({
-          metrics: latest.metrics,
-          stressScore: clamp(latest.stressScore + state.stressNudge),
-          replayTimer: null,
-          isReplaying: false,
-        }))
+        set({ replayTimer: null, isReplaying: false })
       }
-    }, 250)
+    }, 220)
 
     set({ replayTimer: timer })
   },
 
   resetAll: () => {
-    const { simulationTimer, replayTimer } = get()
-    if (simulationTimer) clearInterval(simulationTimer)
+    const socket = get().socket
+    if (socket) socket.close()
+    const replayTimer = get().replayTimer
     if (replayTimer) clearInterval(replayTimer)
-
     set({ ...bootstrap() })
   },
 }))

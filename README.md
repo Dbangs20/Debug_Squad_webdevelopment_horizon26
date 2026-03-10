@@ -27,6 +27,7 @@ OpsPulse is now a full-stack real-time operational intelligence platform. It str
 - `GET /api/events?limit=20`
 - `GET /api/alerts`
 - `GET /api/stress-score`
+- `POST /api/ingest/event` (external business API ingestion)
 - `GET /health`
 
 ## Environment

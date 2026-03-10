@@ -43,5 +43,14 @@ export function createApiRouter(engine) {
     res.json({ stressScore, stressFactors })
   })
 
+  router.post('/ingest/event', async (req, res) => {
+    try {
+      const event = await engine.ingestExternalEvent(req.body ?? {})
+      res.status(201).json({ ok: true, event })
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message })
+    }
+  })
+
   return router
 }

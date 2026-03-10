@@ -115,6 +115,20 @@ const createEvent = () => {
   }
 }
 
+const normalizeExternalEvent = (payload) => {
+  const type = EVENT_TYPES.includes(payload?.type) ? payload.type : 'OrderPlaced'
+  const timestamp = Number(payload?.timestamp) || Date.now()
+
+  return {
+    type,
+    timestamp,
+    value: payload?.value,
+    items: payload?.items,
+    metadata: payload?.metadata ?? {},
+    impactScore: clamp(Number(payload?.impactScore) || randomBetween(20, 75), 0, 100),
+  }
+}
+
 function applyEvent(metrics, event) {
   const next = structuredClone(metrics)
   const now = Date.now()
@@ -249,6 +263,33 @@ export class BusinessEventEngine extends EventEmitter {
       alerts: this.alerts,
       prediction: this.prediction,
     })
+  }
+
+  async ingestExternalEvent(payload) {
+    const event = normalizeExternalEvent(payload)
+    this.metrics = applyEvent(this.metrics, event)
+
+    const stress = calculateStress(this.metrics)
+    this.stressScore = stress.stressScore
+    this.stressFactors = stress.stressFactors
+    this.prediction = generatePrediction(this.metrics)
+
+    const newAlerts = alertsFromEvent(event, this.metrics, this.stressScore)
+    this.alerts = [...newAlerts, ...this.alerts].slice(0, 40)
+    this.recentEvents = [event, ...this.recentEvents].slice(0, 120)
+
+    await this.persistEvent(event)
+
+    this.emit('event', {
+      event,
+      metrics: this.metrics,
+      stressScore: this.stressScore,
+      stressFactors: this.stressFactors,
+      alerts: this.alerts,
+      prediction: this.prediction,
+    })
+
+    return event
   }
 
   scheduleNext() {

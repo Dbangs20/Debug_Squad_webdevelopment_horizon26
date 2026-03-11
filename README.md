@@ -20,6 +20,7 @@ OpsPulse is now a full-stack real-time operational intelligence platform. It str
 - Event-driven alert generation (crisis/opportunity/anomaly)
 - Predictive risk engine for stockout/SLA risk windows
 - Live Event Stream panel (last 20 events)
+- Stress Breakdown Engine (`RootCausePanel`) with factor-wise contribution bars and primary-cause detection
 
 ## API Endpoints
 
@@ -71,5 +72,7 @@ npm run preview
   - `0.30 × Sales Drop`
   - `0.20 × Support Load`
   - `0.15 × Cash Flow Pressure`
+- War Room mode auto-activates above stress score `75` and highlights root cause in red.
+- `RootCausePanel` slides in when stress exceeds `50` and updates live from backend stress factor stream.
 
 See `STRESS_FORMULA_JUSTIFICATION.md` for judge-facing formula rationale.

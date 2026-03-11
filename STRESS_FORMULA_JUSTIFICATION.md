@@ -13,6 +13,9 @@ The **Business Stress Score** condenses multi-vertical operational risk into a s
 
 Final score is clamped to a `0–100` range.
 
+## Backend Computation Model
+Stress is computed on the backend from live event-updated metrics and streamed to the frontend through Socket.io. This ensures a single source of truth for score, factors, alerts, and risk prediction across all clients.
+
 ## Why These Weights
 
 ### 1) Inventory Risk (35%) — highest priority
@@ -52,6 +55,18 @@ Signal basis:
 - `81–100`: Crisis
 
 These bands map directly to UI states and operational urgency.
+
+## Stress Breakdown Engine (Root Cause)
+OpsPulse includes a **Stress Breakdown Engine** that explains score composition in real time:
+- Computes contribution percentage of each weighted factor:
+  - Inventory Risk
+  - Sales Drop
+  - Support Load
+  - Cash Flow Pressure
+- Identifies the highest contributing factor as **Primary Cause Detected**.
+- Renders a visual factor bar chart in `RootCausePanel`.
+- Highlights the primary cause during War Room mode for rapid intervention focus.
+- Panel animates in when stress exceeds `50` and updates on each recalculation cycle.
 
 ## Crisis and War Room Logic
 When score crosses `75`, system enters **War Room Mode** to suppress noise and surface only immediately actionable items:

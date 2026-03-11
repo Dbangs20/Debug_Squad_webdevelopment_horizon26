@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Activity,
   ChartColumnBig,
@@ -27,6 +27,7 @@ import SLARiskPanel from '../components/SLARiskPanel'
 import DecisionLogPanel from '../components/DecisionLogPanel'
 import LiveEventStream from '../components/LiveEventStream'
 import PredictiveRiskPanel from '../components/PredictiveRiskPanel'
+import RootCausePanel from '../components/RootCausePanel'
 import { useMetricsStore } from '../store/metricsStore'
 
 const navItems = [
@@ -59,6 +60,7 @@ export default function Dashboard() {
     liveEvents,
     prediction,
     connected,
+    lastSocketEventAt,
     decisionLog,
     setRole,
     setPage,
@@ -75,6 +77,7 @@ export default function Dashboard() {
 
   const warRoomActive = stressScore > 75 || warRoomManual
   const stressPulse = stressScore > 70
+  const streamActive = connected || Date.now() - lastSocketEventAt < 7000
 
   const sidebar = (
     <aside className="glass-card hidden w-64 flex-col rounded-2xl p-4 lg:flex">
@@ -139,7 +142,7 @@ export default function Dashboard() {
           <RotateCw size={14} /> Replay Last 5 Minutes
         </button>
         <RoleToggle role={role} onChange={setRole} />
-        <LiveIndicator tick={tick} isReplaying={isReplaying} />
+        <LiveIndicator tick={tick} isReplaying={isReplaying} connected={streamActive} />
       </div>
     </div>
   )
@@ -181,8 +184,16 @@ export default function Dashboard() {
         <div className="xl:col-span-4"><SLARiskPanel support={metrics.support} /></div>
       </div>
 
+      <AnimatePresence>
+        {stressScore > 50 ? (
+          <div className="mt-4">
+            <RootCausePanel factors={stressFactors} warRoomActive={warRoomActive} />
+          </div>
+        ) : null}
+      </AnimatePresence>
+
       <div className="mt-4 grid gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-7"><LiveEventStream events={liveEvents} connected={connected} /></div>
+        <div className="xl:col-span-7"><LiveEventStream events={liveEvents} connected={streamActive} /></div>
         <div className="xl:col-span-5"><PredictiveRiskPanel prediction={prediction} /></div>
       </div>
 
@@ -213,8 +224,11 @@ export default function Dashboard() {
         <StressExplainabilityPanel factors={stressFactors} score={stressScore} />
         <DecisionLogPanel logs={decisionLog} />
       </div>
+      <AnimatePresence>
+        {stressScore > 50 ? <RootCausePanel factors={stressFactors} warRoomActive={warRoomActive} /> : null}
+      </AnimatePresence>
       <div className="grid gap-4 lg:grid-cols-2">
-        <LiveEventStream events={liveEvents} connected={connected} />
+        <LiveEventStream events={liveEvents} connected={streamActive} />
         <PredictiveRiskPanel prediction={prediction} />
       </div>
     </div>
@@ -236,8 +250,11 @@ export default function Dashboard() {
         <TimelinePanel events={events} />
         <DecisionLogPanel logs={decisionLog} />
       </div>
+      <AnimatePresence>
+        {stressScore > 50 ? <RootCausePanel factors={stressFactors} warRoomActive={warRoomActive} /> : null}
+      </AnimatePresence>
       <div className="grid gap-4 lg:grid-cols-2">
-        <LiveEventStream events={liveEvents} connected={connected} />
+        <LiveEventStream events={liveEvents} connected={streamActive} />
         <PredictiveRiskPanel prediction={prediction} />
       </div>
     </div>
@@ -245,8 +262,8 @@ export default function Dashboard() {
 
   const sectionMap = {
     dashboard: overview,
-    sales: <div className="space-y-4"><SalesChart data={metrics.sales.series} /><LiveEventStream events={liveEvents} connected={connected} /></div>,
-    inventory: <div className="space-y-4"><InventoryCard inventory={metrics.inventory} /><PredictiveRiskPanel prediction={prediction} /></div>,
+    sales: <div className="space-y-4"><SalesChart data={metrics.sales.series} /><LiveEventStream events={liveEvents} connected={streamActive} /></div>,
+    inventory: <div className="space-y-4"><InventoryCard inventory={metrics.inventory} /><PredictiveRiskPanel prediction={prediction} /><AnimatePresence>{stressScore > 50 ? <RootCausePanel factors={stressFactors} warRoomActive={warRoomActive} /> : null}</AnimatePresence></div>,
     support: <div className="space-y-4"><SupportCard support={metrics.support} /><SLARiskPanel support={metrics.support} /><TimelinePanel events={events} /></div>,
     cashflow: <div className="space-y-4"><CashFlowChart data={metrics.cashFlow.series} /><StressExplainabilityPanel factors={stressFactors} score={stressScore} /></div>,
     alerts: <AlertsPanel alerts={alerts} />,

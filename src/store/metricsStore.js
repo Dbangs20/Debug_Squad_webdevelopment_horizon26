@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { io } from 'socket.io-client'
 import { createInitialMetrics } from '../utils/dataSimulator'
 import { generateActions, generateInsights } from '../utils/alertEngine'
 
@@ -45,16 +46,6 @@ const fetchJson = async (url) => {
   return res.json()
 }
 
-const loadIoClient = async () => {
-  try {
-    const packageName = 'socket.io-client'
-    const mod = await import(/* @vite-ignore */ packageName)
-    return mod.io
-  } catch {
-    return null
-  }
-}
-
 const bootstrap = () => {
   const metrics = createInitialMetrics()
 
@@ -81,6 +72,7 @@ const bootstrap = () => {
     warRoomManual: false,
     socket: null,
     connected: false,
+    lastSocketEventAt: 0,
     replayTimer: null,
     stressNudge: 0,
   }
@@ -149,18 +141,12 @@ export const useMetricsStore = create((set, get) => ({
 
     await get().initializeFromApi()
 
-    const ioFactory = await loadIoClient()
-    if (!ioFactory) {
-      set({ connected: false })
-      return
-    }
-
-    const socket = ioFactory(SOCKET_URL, {
+    const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
     })
 
     socket.on('connect', () => {
-      set({ connected: true, socket })
+      set({ connected: true, socket, lastSocketEventAt: Date.now() })
     })
 
     socket.on('disconnect', () => {
@@ -169,6 +155,8 @@ export const useMetricsStore = create((set, get) => ({
 
     socket.on('newEvent', (event) => {
       set((state) => ({
+        connected: true,
+        lastSocketEventAt: Date.now(),
         liveEvents: [event, ...state.liveEvents].slice(0, 20),
         events: [toTimelineEntry(event), ...state.events].slice(0, 180),
         tick: Date.now(),
@@ -179,6 +167,8 @@ export const useMetricsStore = create((set, get) => ({
       set((state) => {
         const score = state.stressScore
         return {
+          connected: true,
+          lastSocketEventAt: Date.now(),
           metrics,
           insights: generateInsights(metrics),
           actions: generateActions(metrics),
@@ -191,6 +181,8 @@ export const useMetricsStore = create((set, get) => ({
 
     socket.on('updatedStressScore', ({ stressScore, stressFactors }) => {
       set((state) => ({
+        connected: true,
+        lastSocketEventAt: Date.now(),
         stressScore: Math.max(0, Math.min(100, stressScore + state.stressNudge)),
         stressFactors: stressFactors ?? state.stressFactors,
         tick: Date.now(),
@@ -198,7 +190,7 @@ export const useMetricsStore = create((set, get) => ({
     })
 
     socket.on('alerts', (alerts) => {
-      set({ alerts: alerts ?? [] })
+      set({ connected: true, lastSocketEventAt: Date.now(), alerts: alerts ?? [] })
     })
 
     set({ socket })

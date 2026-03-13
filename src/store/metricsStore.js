@@ -3,8 +3,14 @@ import { io } from 'socket.io-client'
 import { createInitialMetrics } from '../utils/dataSimulator'
 import { generateActions, generateInsights } from '../utils/alertEngine'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4000'
+const BACKEND_BASE =
+  import.meta.env.VITE_SOCKET_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:4000`
+    : 'http://localhost:4000')
+
+const API_URL = import.meta.env.VITE_API_URL || `${BACKEND_BASE}/api`
+const SOCKET_URL = BACKEND_BASE
 
 const REPLAY_POINTS = 150
 const DECISION_POINTS = 40
@@ -72,7 +78,9 @@ const bootstrap = () => {
     warRoomManual: false,
     socket: null,
     connected: false,
+    backendOnline: false,
     lastSocketEventAt: 0,
+    pollTimer: null,
     replayTimer: null,
     stressNudge: 0,
   }
@@ -104,58 +112,97 @@ export const useMetricsStore = create((set, get) => ({
       ].slice(0, DECISION_POINTS),
     })),
 
+  syncFromApi: async () => {
+    const [metricsRes, alertsRes, stressRes, eventsRes] = await Promise.all([
+      fetchJson(`${API_URL}/metrics`),
+      fetchJson(`${API_URL}/alerts`),
+      fetchJson(`${API_URL}/stress-score`),
+      fetchJson(`${API_URL}/events?limit=20`),
+    ])
+
+    const metrics = metricsRes.metrics
+    const stressScore = Math.max(0, Math.min(100, (stressRes.stressScore ?? 0) + get().stressNudge))
+    const liveEvents = eventsRes.events ?? []
+    const timeline = liveEvents.map(toTimelineEntry)
+
+    set((state) => ({
+      backendOnline: true,
+      metrics,
+      insights: generateInsights(metrics),
+      actions: generateActions(metrics),
+      prediction: metricsRes.prediction ?? state.prediction,
+      alerts: alertsRes.alerts ?? [],
+      stressScore,
+      stressFactors: stressRes.stressFactors ?? defaultStressFactors,
+      liveEvents,
+      events: timeline,
+      history: [...state.history, { timestamp: Date.now(), metrics, stressScore }].slice(-REPLAY_POINTS),
+      tick: Date.now(),
+    }))
+  },
+
   initializeFromApi: async () => {
     try {
-      const [metricsRes, alertsRes, stressRes, eventsRes] = await Promise.all([
-        fetchJson(`${API_URL}/metrics`),
-        fetchJson(`${API_URL}/alerts`),
-        fetchJson(`${API_URL}/stress-score`),
-        fetchJson(`${API_URL}/events?limit=20`),
-      ])
-
-      const metrics = metricsRes.metrics
-      const stressScore = Math.max(0, Math.min(100, (stressRes.stressScore ?? 0) + get().stressNudge))
-      const liveEvents = eventsRes.events ?? []
-      const timeline = liveEvents.map(toTimelineEntry)
-
-      set((state) => ({
-        metrics,
-        insights: generateInsights(metrics),
-        actions: generateActions(metrics),
-        prediction: metricsRes.prediction ?? state.prediction,
-        alerts: alertsRes.alerts ?? [],
-        stressScore,
-        stressFactors: stressRes.stressFactors ?? defaultStressFactors,
-        liveEvents,
-        events: timeline,
-        history: [...state.history, { timestamp: Date.now(), metrics, stressScore }].slice(-REPLAY_POINTS),
-        tick: Date.now(),
-      }))
+      await get().syncFromApi()
     } catch {
-      set({ connected: false })
+      set({ connected: false, backendOnline: false })
     }
+  },
+
+  startPolling: () => {
+    if (get().pollTimer) return
+
+    const timer = setInterval(async () => {
+      // Poll only while websocket is not healthy.
+      if (get().connected) return
+      try {
+        await get().syncFromApi()
+      } catch {
+        set({ backendOnline: false })
+      }
+    }, 2000)
+
+    set({ pollTimer: timer })
+  },
+
+  stopPolling: () => {
+    const pollTimer = get().pollTimer
+    if (pollTimer) clearInterval(pollTimer)
+    set({ pollTimer: null })
   },
 
   connectRealtime: async () => {
     if (get().socket) return
 
     await get().initializeFromApi()
+    get().startPolling()
 
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1200,
     })
 
     socket.on('connect', () => {
       set({ connected: true, socket, lastSocketEventAt: Date.now() })
+      get().stopPolling()
     })
 
     socket.on('disconnect', () => {
       set({ connected: false })
+      get().startPolling()
+    })
+
+    socket.on('connect_error', () => {
+      set({ connected: false })
+      get().startPolling()
     })
 
     socket.on('newEvent', (event) => {
       set((state) => ({
         connected: true,
+        backendOnline: true,
         lastSocketEventAt: Date.now(),
         liveEvents: [event, ...state.liveEvents].slice(0, 20),
         events: [toTimelineEntry(event), ...state.events].slice(0, 180),
@@ -168,6 +215,7 @@ export const useMetricsStore = create((set, get) => ({
         const score = state.stressScore
         return {
           connected: true,
+          backendOnline: true,
           lastSocketEventAt: Date.now(),
           metrics,
           insights: generateInsights(metrics),
@@ -182,6 +230,7 @@ export const useMetricsStore = create((set, get) => ({
     socket.on('updatedStressScore', ({ stressScore, stressFactors }) => {
       set((state) => ({
         connected: true,
+        backendOnline: true,
         lastSocketEventAt: Date.now(),
         stressScore: Math.max(0, Math.min(100, stressScore + state.stressNudge)),
         stressFactors: stressFactors ?? state.stressFactors,
@@ -190,7 +239,7 @@ export const useMetricsStore = create((set, get) => ({
     })
 
     socket.on('alerts', (alerts) => {
-      set({ connected: true, lastSocketEventAt: Date.now(), alerts: alerts ?? [] })
+      set({ connected: true, backendOnline: true, lastSocketEventAt: Date.now(), alerts: alerts ?? [] })
     })
 
     set({ socket })
@@ -203,7 +252,8 @@ export const useMetricsStore = create((set, get) => ({
   stopSimulation: () => {
     const socket = get().socket
     if (socket) socket.close()
-    set({ socket: null, connected: false })
+    get().stopPolling()
+    set({ socket: null, connected: false, backendOnline: false })
   },
 
   replayHistory: () => {
@@ -242,6 +292,8 @@ export const useMetricsStore = create((set, get) => ({
   resetAll: () => {
     const socket = get().socket
     if (socket) socket.close()
+    const pollTimer = get().pollTimer
+    if (pollTimer) clearInterval(pollTimer)
     const replayTimer = get().replayTimer
     if (replayTimer) clearInterval(replayTimer)
     set({ ...bootstrap() })

@@ -60,6 +60,7 @@ export default function Dashboard() {
     liveEvents,
     prediction,
     connected,
+    backendOnline,
     lastSocketEventAt,
     decisionLog,
     setRole,
@@ -77,7 +78,7 @@ export default function Dashboard() {
 
   const warRoomActive = stressScore > 75 || warRoomManual
   const stressPulse = stressScore > 70
-  const streamActive = connected || Date.now() - lastSocketEventAt < 7000
+  const streamActive = connected || backendOnline || Date.now() - lastSocketEventAt < 7000
 
   const sidebar = (
     <aside className="glass-card hidden w-64 flex-col rounded-2xl p-4 lg:flex">
